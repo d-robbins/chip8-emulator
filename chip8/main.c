@@ -1,51 +1,8 @@
-#include <stdio.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-#include <memory.h>
-#include <time.h>
-
-
-#define MEM_SIZE 1 << 12
-#define START_STACK 12
-#define VF 0xF
-#define EXPORT_PROGRAM 0
-#define COSMAC_TARGET 1
+#include "chip8.h"
 
 const char* PROGRAM = "IBM Logo.ch8";
 
-void decode(uint16_t instruction, struct STACK* st);
-void push(struct STACK* s, uint16_t val);
-uint16_t pop(struct STACK* s);
-
-// PROGRAM COUNTER
-// only addresses 12 bits
-uint16_t _PC = 0x0000; 
-
-struct MEM;
-struct STACK;
-struct DISPLAY;
-
-uint8_t REG[16];
-uint16_t INDEX = 0x0000;
-
-struct DISPLAY
-{
-	uint8_t _D[32][64];
-};
-
-struct MEM 
-{
-	uint8_t _M[MEM_SIZE];
-};
-
-struct STACK  {
-	int _pos;
-	int _size;
-	uint16_t* _S;
-};
-
-void instr_error(uint16_t instruction, uint8_t parent_op, struct STACK* stack) {
+void instr_error(uint16_t instruction, uint8_t parent_op, STACK* stack) {
 	printf("INSTRUCTION ERROR\n");
 	printf("Instruction %X\tParent %X\n", instruction, parent_op);
 	/*int i = 0;
@@ -69,58 +26,59 @@ void delay(int number_of_seconds)
 	while (clock() < start_time + milli_seconds);
 }
 
-void push(struct STACK* s, uint16_t val)
+void push(STACK* s, uint16_t val)
 {
 	if (s->_pos == s->_size - 1) {
-		uint16_t* nStack = (uint16_t*) realloc(s->_S, s->_size * 2);
+		uint16_t* nStack = (uint16_t*) realloc(s->_stack, s->_size * 2);
 		if (nStack == NULL)
 		{
 			printf("Could not resize stack, current size: %d\nexiting", s->_size);
-			free(s->_S);
+			free(s->_stack);
 			exit(1);
 		} 
 		else
 		{
-			s->_S = nStack;
+			s->_stack = nStack;
 		}
 		
 		s->_size *= 2;
 	}
 
 	s->_pos += 1;
-	s->_S[s->_pos] = val;
+	s->_stack[s->_pos] = val;
 }
 
-uint16_t pop(struct STACK* stack)
+uint16_t pop(STACK* stack)
 {
 	if (stack->_pos - 1 >= 0) {
 		stack->_pos -= 1;
-		return stack->_S[stack->_pos + 1];
+		return stack->_stack[stack->_pos + 1];
 	}
 }
 
-
-uint16_t fetch(struct MEM* memory, struct STACK* st)
+int fetch(CPU* cpu)
 {
-	uint16_t fByte = (uint16_t) memory->_M[_PC];
-	uint8_t sByte = memory->_M[_PC + 1];
+	uint16_t fByte = (uint16_t) cpu->_M->_MEM[cpu->_PC];
+	uint8_t sByte = cpu->_M->_MEM[cpu->_PC + 1];
 
 	uint16_t instruction = (fByte << 8) | sByte;
 
-	_PC += 2;
+	cpu->_PC += 2;
 
-	return instruction;
+	cpu->_CINSTR = instruction;
+
+	return 0;
 }
 
-void decode(uint16_t instruction, struct STACK* st, struct MEM* mem, struct DISPLAY* disp)
+void decode(CPU* cpu)
 {
-	uint8_t op = ((instruction >> 12) & 0x000F);
+	uint8_t op = ((cpu->_CINSTR >> 12) & 0x000F);
 
 	switch (op)
 	{
 	case 0x00:
 	{
-			uint8_t det = (instruction & 0x00FF);
+			uint8_t det = (cpu->_CINSTR & 0x00FF);
 			switch (det)
 			{
 			case 0xE0:
@@ -130,252 +88,252 @@ void decode(uint16_t instruction, struct STACK* st, struct MEM* mem, struct DISP
 				{
 					for (j = 0; j < 64; j++)
 					{
-						disp->_D[i][j] = 0;
+						cpu->_D->_DSP[i][j] = 0;
 					}
 				}
 			} break;
 			case 0xEE:
 			{
-				uint16_t addr = pop(st);
-				_PC = addr;
+				uint16_t addr = pop(cpu->_S);
+				cpu->_PC = addr;
 
 			} break;
-			default: instr_error(instruction, det, st);  break;
+			default: instr_error(cpu->_CINSTR, det,cpu->_S);  break;
 			}
 		} break;
 	case 0x01:
 	{
-		_PC = (instruction) & 0x0FFF;
+		cpu->_PC = (cpu->_CINSTR) & 0x0FFF;
 	} break;
 	case 0x02:
 	{
-		push(st, _PC);
-		_PC = ((instruction) & 0x0FFF);
+		push(cpu->_S, cpu->_PC);
+		cpu->_PC = ((cpu->_CINSTR) & 0x0FFF);
 	} break;
 	case 0x03:
 	{
 		// 3XNN 
-		uint8_t reg = ((instruction >> 8) & 0x000F);
-		uint8_t val = (instruction & 0x00FF);
-		if (REG[reg] == val) {
-			_PC += 2;
+		uint8_t reg = ((cpu->_CINSTR >> 8) & 0x000F);
+		uint8_t val = (cpu->_CINSTR & 0x00FF);
+		if (cpu->_REG[reg] == val) {
+			cpu->_PC += 2;
 		}
 	} break;
 	case 0x04:
 	{
-		uint8_t reg = ((instruction >> 8) & 0x000F);
-		uint8_t val = (instruction & 0x00FF);
-		if (REG[reg] != val) {
-			_PC += 2;
+		uint8_t reg = ((cpu->_CINSTR >> 8) & 0x000F);
+		uint8_t val = (cpu->_CINSTR & 0x00FF);
+		if (cpu->_REG[reg] != val) {
+			cpu->_PC += 2;
 		}
 	} break;
 	case 0x05:
 	{
-		uint8_t condition = ((instruction & 0xFFF0));
+		uint8_t condition = ((cpu->_CINSTR & 0xFFF0));
 		if (condition == 0x0000) {
-			uint8_t xReg = ((instruction >> 8) & 0x000F);
-			uint8_t yReg = ((instruction >> 4) & 0x000F);
-			if (REG[xReg] == REG[yReg])
+			uint8_t xReg = ((cpu->_CINSTR >> 8) & 0x000F);
+			uint8_t yReg = ((cpu->_CINSTR >> 4) & 0x000F);
+			if (cpu->_REG[xReg] == cpu->_REG[yReg])
 			{
-				_PC += 2;
+				cpu->_PC += 2;
 			}
 		}
 	} break;
 	case 0x06:
 	{
 		// 6XNN
-		uint8_t reg = ((instruction >> 8) & 0x000F);
-		uint8_t val = (uint8_t)instruction & 0x00FF;
+		uint8_t reg = ((cpu->_CINSTR >> 8) & 0x000F);
+		uint8_t val = (uint8_t)cpu->_CINSTR & 0x00FF;
 
-		REG[reg] = val;
+		cpu->_REG[reg] = val;
 	} break;
 	case 0x07:
 	{
 		// ADD 
-		uint8_t reg = ((instruction >> 8) & 0x000F);
-		uint8_t val = (uint8_t)instruction;
+		uint8_t reg = ((cpu->_CINSTR >> 8) & 0x000F);
+		uint8_t val = (uint8_t)cpu->_CINSTR;
 
-		REG[reg] += val;
+		cpu->_REG[reg] += val;
 	} break;
 	case 0x08:
 	{
-		uint8_t sub_op = (uint8_t)(instruction & 0x000F);
+		uint8_t sub_op = (uint8_t)(cpu->_CINSTR & 0x000F);
 		switch (sub_op)
 		{
 		case 0x00: 
 		{
-			uint8_t xReg = (instruction >> 8) & 0x000F;
-			uint8_t yReg = (instruction >> 4) & 0x000F;
+			uint8_t xReg = (cpu->_CINSTR >> 8) & 0x000F;
+			uint8_t yReg = (cpu->_CINSTR >> 4) & 0x000F;
 
-			REG[xReg] = REG[yReg];
+			cpu->_REG[xReg] = cpu->_REG[yReg];
 		} break;
 		case 0x01:
 		{
-			uint8_t xReg = (instruction >> 8 ) & 0x000F;
-			uint8_t yReg = (instruction >> 4 ) & 0x000F;
+			uint8_t xReg = (cpu->_CINSTR >> 8 ) & 0x000F;
+			uint8_t yReg = (cpu->_CINSTR >> 4 ) & 0x000F;
 
-			REG[xReg] = REG[xReg] | REG[yReg];
+			cpu->_REG[xReg] = cpu->_REG[xReg] | cpu->_REG[yReg];
 		} break;
 		case 0x02:
 		{
-			uint8_t xReg = (instruction >> 8) & 0x000F;
-			uint8_t yReg = (instruction >> 4) & 0x000F;
+			uint8_t xReg = (cpu->_CINSTR >> 8) & 0x000F;
+			uint8_t yReg = (cpu->_CINSTR >> 4) & 0x000F;
 
-			REG[xReg] = REG[xReg] & REG[yReg];
+			cpu->_REG[xReg] = cpu->_REG[xReg] & cpu->_REG[yReg];
 		} break;
 		case 0x03:
 		{
-			uint8_t xReg = (instruction >> 8) & 0x000F;
-			uint8_t yReg = (instruction >> 4) & 0x000F;
+			uint8_t xReg = (cpu->_CINSTR >> 8) & 0x000F;
+			uint8_t yReg = (cpu->_CINSTR >> 4) & 0x000F;
 
-			REG[xReg] = REG[xReg] ^ REG[yReg];
+			cpu->_REG[xReg] = cpu->_REG[xReg] ^ cpu->_REG[yReg];
 		} break;
 		case 0x04:
 		{
 			// ADD with VF FLAG
-			uint8_t xReg = (instruction >> 8) & 0x000F;
-			uint8_t yReg = (instruction >> 4) & 0x000F;
-			if ((REG[xReg] + REG[yReg]) > 255)
+			uint8_t xReg = (cpu->_CINSTR >> 8) & 0x000F;
+			uint8_t yReg = (cpu->_CINSTR >> 4) & 0x000F;
+			if ((cpu->_REG[xReg] + cpu->_REG[yReg]) > 255)
 			{
-				REG[VF] = 1;
+				cpu->_REG[VF] = 1;
 			}
 			else 
 			{
-				REG[VF] = 0;
+				cpu->_REG[VF] = 0;
 			}
 
-			REG[xReg] += REG[yReg];
+			cpu->_REG[xReg] += cpu->_REG[yReg];
 		} break;
 		case 0x05:
 		{
 			// SUB with VF FLAG
-			uint8_t xReg = (instruction >> 8) & 0x000F;
-			uint8_t yReg = (instruction >> 4) & 0x000F;
+			uint8_t xReg = (cpu->_CINSTR >> 8) & 0x000F;
+			uint8_t yReg = (cpu->_CINSTR >> 4) & 0x000F;
 			
-			if (REG[xReg] > REG[yReg]) 
+			if (cpu->_REG[xReg] > cpu->_REG[yReg]) 
 			{
-				REG[VF] = 1;
+				cpu->_REG[VF] = 1;
 			}
 			else
 			{
-				REG[VF] = 0;
+				cpu->_REG[VF] = 0;
 			}
 
-			REG[xReg] -= REG[yReg];
+			cpu->_REG[xReg] -= cpu->_REG[yReg];
 		} break;
 		case 0x06:
 		{
 			// 8XY6
 
-			uint8_t xReg = (instruction >> 8 ) & 0x000F;
-			uint8_t yReg = (instruction >> 4 ) & 0x000F;
+			uint8_t xReg = (cpu->_CINSTR >> 8 ) & 0x000F;
+			uint8_t yReg = (cpu->_CINSTR >> 4 ) & 0x000F;
 
 			if (COSMAC_TARGET)
 			{
-				REG[xReg] = REG[yReg];
+				cpu->_REG[xReg] = cpu->_REG[yReg];
 			}
 
-			uint8_t reg_val = (REG[xReg] & 0x01);
+			uint8_t reg_val = (cpu->_REG[xReg] & 0x01);
 			if (reg_val > 0)
 			{
-				REG[VF] = 1;
+				cpu->_REG[VF] = 1;
 			}
 			else
 			{
-				REG[VF] = 0;
+				cpu->_REG[VF] = 0;
 			}
 
-			REG[xReg] = REG[xReg] >> 1;
+			cpu->_REG[xReg] = cpu->_REG[xReg] >> 1;
 		} break;
 		case 0x07:
 		{
 			// SUB with VF FLAG
-			uint8_t xReg = (instruction >> 8) & 0x000F;
-			uint8_t yReg = (instruction >> 4) & 0x000F;
+			uint8_t xReg = (cpu->_CINSTR >> 8) & 0x000F;
+			uint8_t yReg = (cpu->_CINSTR >> 4) & 0x000F;
 
-			if (REG[yReg] > REG[xReg])
+			if (cpu->_REG[yReg] > cpu->_REG[xReg])
 			{
-				REG[VF] = 1;
+				cpu->_REG[VF] = 1;
 			}
 			else
 			{
-				REG[VF] = 0;
+				cpu->_REG[VF] = 0;
 			}
 
-			REG[xReg] = REG[yReg] - REG[xReg];
+			cpu->_REG[xReg] = cpu->_REG[yReg] - cpu->_REG[xReg];
 		} break;
 		
 		case 0x0E:
 		{
-			uint8_t xReg = (instruction >> 8) & 0x000F;
-			uint8_t yReg = (instruction >> 4) & 0x000F;
+			uint8_t xReg = (cpu->_CINSTR >> 8) & 0x000F;
+			uint8_t yReg = (cpu->_CINSTR >> 4) & 0x000F;
 
 			if (COSMAC_TARGET)
 			{
-				REG[xReg] = REG[yReg];
+				cpu->_REG[xReg] = cpu->_REG[yReg];
 			}
 
-			uint8_t reg_val = (REG[xReg] & 0x80);
+			uint8_t reg_val = (cpu->_REG[xReg] & 0x80);
 			if (reg_val > 0)
 			{
-				REG[VF] = 1;
+				cpu->_REG[VF] = 1;
 			} 
 			else
 			{
-				REG[VF] = 0;
+				cpu->_REG[VF] = 0;
 			}
 
-			REG[xReg] = REG[xReg] << 1;
+			cpu->_REG[xReg] = cpu->_REG[xReg] << 1;
 		} break;
-		default: instr_error(instruction, sub_op, st); break;
+		default: instr_error(cpu->_CINSTR, sub_op,cpu->_S); break;
 		}
 	} break;
 	case 0x09:
 	{
-		uint8_t condition = ((instruction & 0xFFF0));
+		uint8_t condition = ((cpu->_CINSTR & 0xFFF0));
 		if (condition == 0x0000) {
-			uint8_t xReg = ((instruction & 0x0F00) >> 8);
-			uint8_t yReg = ((instruction & 0x00F0) >> 4);
-			if (REG[xReg] != REG[yReg])
+			uint8_t xReg = ((cpu->_CINSTR & 0x0F00) >> 8);
+			uint8_t yReg = ((cpu->_CINSTR & 0x00F0) >> 4);
+			if (cpu->_REG[xReg] != cpu->_REG[yReg])
 			{
-				_PC += 2;
+				cpu->_PC += 2;
 			}
 		}
 	} break;
 	case 0x0A:
 	{
-		uint16_t NNN = (instruction & 0x0FFF);
-		INDEX = NNN;
+		uint16_t NNN = (cpu->_CINSTR & 0x0FFF);
+		cpu->_I = NNN;
 	} break;
 	case 0x0B:
 	{
-		uint16_t NNN = (instruction & 0x0FFF);
+		uint16_t NNN = (cpu->_CINSTR & 0x0FFF);
 	
 		if (COSMAC_TARGET)
 		{
-			_PC = NNN + (uint16_t)(REG[0x0]);
+			cpu->_PC = NNN + (uint16_t)(cpu->_REG[0x0]);
 		} 
 		else
 		{
-			_PC = NNN + (instruction & 0x0F00);
+			cpu->_PC = NNN + (cpu->_CINSTR & 0x0F00);
 		}
 	} break;
 	case 0x0C:
 	{
-		uint8_t random = 23 & (uint8_t)(instruction & 0x00FF);
-		uint8_t reg = ((instruction & 0x0F00) >> 8);
+		uint8_t random = 23 & (uint8_t)(cpu->_CINSTR & 0x00FF);
+		uint8_t reg = ((cpu->_CINSTR & 0x0F00) >> 8);
 
-		REG[reg] = random;
+		cpu->_REG[reg] = random;
 	} break;
 	case 0x0D:
 	{
 		// DXYN
 
-		uint8_t height = (uint8_t)(instruction & 0x000F);
+		uint8_t height = (uint8_t)(cpu->_CINSTR & 0x000F);
 		uint16_t xCord;
-		uint16_t yCord = (REG[(uint8_t)((instruction >> 4) & 0x000F)] & (31));
+		uint16_t yCord = (cpu->_REG[(uint8_t)((cpu->_CINSTR >> 4) & 0x000F)] & (31));
 		
-		REG[VF] = 0;
+		cpu->_REG[VF] = 0;
 
 		uint8_t i;
 		for (i = 0; i < height; i++)
@@ -385,8 +343,8 @@ void decode(uint16_t instruction, struct STACK* st, struct MEM* mem, struct DISP
 				break;
 			}
 
-			xCord = (REG[(uint8_t)((instruction >> 8) & 0x000F)] & (63));
-			uint8_t sData = mem->_M[INDEX + (uint16_t)i];
+			xCord = (cpu->_REG[(uint8_t)((cpu->_CINSTR >> 8) & 0x000F)] & (63));
+			uint8_t sData = cpu->_M->_MEM[cpu->_I + (uint16_t)i];
 
 			uint8_t bit;
 			for (bit = 0; bit < 8; bit++) 
@@ -396,16 +354,16 @@ void decode(uint16_t instruction, struct STACK* st, struct MEM* mem, struct DISP
 				}
 
 				uint8_t val = (sData >> (7 - bit)) & 0x0001;
-				if ((val > 0) && (disp->_D[yCord][xCord] == 1))
+				if ((val > 0) && (cpu->_D->_DSP[yCord][xCord] == 1))
 				{
 					uint8_t nData = (sData & (~((0x1 << (7 - bit)))));
-					mem->_M[INDEX + i] = nData;
-					disp->_D[yCord][xCord] = 0;
-					REG[VF] = 1;
+					cpu->_M->_MEM[cpu->_I + i] = nData;
+					cpu->_D->_DSP[yCord][xCord] = 0;
+					cpu->_REG[VF] = 1;
 				}
-				else if ((val > 0) && (disp->_D[yCord][xCord] == 0))
+				else if ((val > 0) && (cpu->_D->_DSP[yCord][xCord] == 0))
 				{
-					disp->_D[yCord][xCord] = 1;
+					cpu->_D->_DSP[yCord][xCord] = 1;
 				}
 				
 				xCord += 1;
@@ -416,47 +374,47 @@ void decode(uint16_t instruction, struct STACK* st, struct MEM* mem, struct DISP
 
 	case 0x0F:
 	{
-		uint8_t sub_op = (uint8_t)((instruction) & 0x00FF);
+		uint8_t sub_op = (uint8_t)((cpu->_CINSTR) & 0x00FF);
 		switch (sub_op)
 		{
 		case 0x55:
 		{
 			uint8_t reg = 0;
-			uint8_t range = (uint8_t)((instruction >> 8) & 0x000F);
+			uint8_t range = (uint8_t)((cpu->_CINSTR >> 8) & 0x000F);
 			for (reg = 0; reg <= range; reg++)
 			{
 				if (COSMAC_TARGET)
 				{
-					mem->_M[INDEX] = REG[reg];
-					INDEX++;
+					cpu->_M->_MEM[cpu->_I] = cpu->_REG[reg];
+					cpu->_I++;
 				}
 				else
 				{
-					mem->_M[INDEX + reg] = REG[reg];
+					cpu->_M->_MEM[cpu->_I + reg] = cpu->_REG[reg];
 				}
 			}
 		} break;
 		case 0x65:
 		{
 			uint8_t reg = 0;
-			uint8_t range = (uint8_t)((instruction >> 8) & 0x000F);
+			uint8_t range = (uint8_t)((cpu->_CINSTR >> 8) & 0x000F);
 			for (reg = 0; reg <= range; reg++)
 			{
 				if (COSMAC_TARGET)
 				{
-					REG[reg] = mem->_M[INDEX];
-					INDEX++;
+					cpu->_REG[reg] =cpu->_M->_MEM[cpu->_I];
+					cpu->_I++;
 				}
 				else
 				{
-					REG[reg] = mem->_M[INDEX + reg];
+					cpu->_REG[reg] =cpu->_M->_MEM[cpu->_I + reg];
 				}
 			}
 		} break;
 		case 0x33:
 		{
-			int reg = ((instruction >> 8) & 0x000F);
-			int val = REG[reg];
+			int reg = ((cpu->_CINSTR >> 8) & 0x000F);
+			int val = cpu->_REG[reg];
 
 			uint8_t last_digit = (uint8_t)(val % 10);
 			val /= 10;
@@ -466,109 +424,112 @@ void decode(uint16_t instruction, struct STACK* st, struct MEM* mem, struct DISP
 
 			uint8_t first_digit = (uint8_t)(val / 10);
 
-			mem->_M[INDEX] = first_digit;
-			mem->_M[INDEX + 1] = mid_digit;
-			mem->_M[INDEX + 2] = last_digit;
+			cpu->_M->_MEM[cpu->_I] = first_digit;
+			cpu->_M->_MEM[cpu->_I + 1] = mid_digit;
+			cpu->_M->_MEM[cpu->_I + 2] = last_digit;
 		} break;
-		default: instr_error(instruction, sub_op, st); break;
+		default: instr_error(cpu->_CINSTR, sub_op,cpu->_S); break;
 		}
 	} break;
 
-	default: instr_error(instruction, op, st); break;
+	default: instr_error(cpu->_CINSTR, op,cpu->_S); break;
 	}
 }
 
-
-int main(int argc, char** argv)
+CPU* create_cpu()
 {
-	struct MEM memory;
-	struct STACK stack;
-	struct DISPLAY display;
+	// create cpu
+	CPU* cpu = malloc(sizeof(CPU));
+	if (!cpu) { perror("malloc of cpu\n"); exit(1); }
 
+	// create the display
+	cpu->_D = malloc(sizeof(DISPLAY));
+	if (!cpu->_D) { perror("malloc of display\n"); exit(1); }
 
+	// create memory
+	cpu->_M = malloc(sizeof(MEMORY));
+	if (!cpu->_M) { perror("malloc of memory\n"); exit(1); }
+
+	// create stack
+	cpu->_S = malloc(sizeof(STACK));
+	if (!cpu->_S) { perror("malloc of stack\n"); exit(1); }
+
+	clear_display(cpu->_D);
+
+	erase_memory(cpu->_M);
+
+	init_stack(cpu->_S);
+
+	// set program counter to byte 512
+	cpu->_PC = 0x0200;
+	
+	// set index register to 0
+	cpu->_I = 0x0000;
+
+	// set current instruction to 0x0000
+	cpu->_CINSTR = 0x0000;
+
+	return cpu;
+}
+
+/// <summary>
+/// Clear the cpu's display
+/// </summary>
+/// <param name="display"></param>
+void clear_display(DISPLAY* display)
+{
+	int i;
+
+	for (i = 0; i < DH; i++)
+	{
+		memset(display->_DSP[i], 0, DW);
+	}
+}
+
+/// <summary>
+/// Clear the CPU's memory
+/// </summary>
+/// <param name="memory"></param>
+void erase_memory(MEMORY* memory)
+{
+	memset(memory->_MEM, 0, MEM_SIZE);
+}
+
+void init_stack(STACK* stack)
+{
+	stack->_stack = malloc(sizeof(START_STACK));
+	stack->_size = START_STACK;
+	stack->_pos = 0;
+}
+
+void draw_display(DISPLAY* disp)
+{
 	int i, j;
 	for (i = 0; i < 32; i++)
 	{
-		memset(display._D[i], 0, 64);
-	}
-
-	memset(memory._M, 0, MEM_SIZE);
-	memset(REG, 0, 16);
-
-	FILE* fp;
-	uint8_t program[130];
-	fp = fopen(PROGRAM, "r");
-	if (fp == NULL)
-	{
-		printf("Error");
-		return 1;
-	}
-
-	while (fgets(program, 130, fp) != NULL) {}
-
-	//_strrev(program);
-
-	fclose(fp);
-
-	if (EXPORT_PROGRAM)
-	{
-		fp = fopen("program.txt", "w");
-		if (fp == NULL)
+		for (j = 0; j < 64; j++)
 		{
-			printf("Error opening program output file\n");
-			exit(1);
-		}
-		else
-		{
-			int i = 0;
-			for (i = 1; i < 500 - 1; i+=2)
+			if (disp->_DSP[i][j] != 0)
 			{
-				fputc(program[i - 1], fp);
-				fputc(program[i], fp);
-				//fputc('\n', fp);
+				printf("%c", '#');
+			}
+			else
+			{
+				printf("%c", ' ');
 			}
 		}
-
-		fclose(fp);
+		printf("\n");
 	}
+}
 
-	for (i = 0; i < 130; i++)
-	{
-		memory._M[512 + i] = program[i];
-	}
+int main(int argc, char** argv)
+{
+	CPU* cpu = create_cpu();
 
-	_PC = 512;
-
-	stack._S = (uint16_t*)malloc(START_STACK);
-	stack._size = START_STACK;
-	stack._pos = 0;
-	
-	uint16_t instruction;
-
-	for (;;)
-	{
-		instruction = fetch(&memory, &stack);
-		decode(instruction, &stack, &memory, &display);
-
-		for (i = 0; i < 32; i++)
-		{
-			for (j = 0; j < 64; j++)
-			{
-				if (display._D[i][j] != 0)
-				{
-					printf("%c", '#');
-				}
-				else
-				{
-					printf("%c", ' ');
-				}
-			}
-			printf("\n");
-		}
-
-		delay(1);
-	}
-
-	free(stack._S);
+	free(cpu->_S->_stack);
+	free(cpu->_S);
+	free(cpu->_D);
+	free(cpu->_M);
+	free(cpu);
 	return 0;
 }

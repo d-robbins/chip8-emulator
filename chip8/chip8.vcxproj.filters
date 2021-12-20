@@ -15,8 +15,8 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="IBM Logo.ch8" />
-    <None Include="test_opcode.ch8" />
+    <None Include="tests\IBM Logo.ch8" />
+    <None Include="tests\test_opcode.ch8" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.c">
@@ -24,6 +24,11 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <Text Include="program.txt" />
+    <Text Include="tests\program.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="chip8.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
