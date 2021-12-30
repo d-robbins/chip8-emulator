@@ -1,23 +1,19 @@
 #include "chip8.h"
+#include <conio.h>
+#include <SFML/Window.h>
+#include <SFML/Graphics.h>
 
-const char* PROGRAM = "IBM Logo.ch8";
+const char* PROGRAM = "tests/bc_test.ch8";
 
-void instr_error(uint16_t instruction, uint8_t parent_op, STACK* stack) {
+void instr_error(uint16_t instruction, uint8_t parent_op) {
 	printf("INSTRUCTION ERROR\n");
-	printf("Instruction %X\tParent %X\n", instruction, parent_op);
-	/*int i = 0;
-	printf("STACK CONTENTS\n\n");
-	while (stack->_pos > 0)
-	{
-		uint16_t val = pop(stack);
-		printf("%d\n", val);
-	}*/
+	printf("Instruction %.4X\tParent %.1X\n", instruction, parent_op);
 }
 
-void delay(int number_of_seconds)
+void delay_cpu(float number_of_seconds)
 {
 	// Converting time into milli_seconds
-	int milli_seconds = 1000 * number_of_seconds;
+	int milli_seconds = 1000.0 * number_of_seconds;
 
 	// Storing start time
 	clock_t start_time = clock();
@@ -26,44 +22,12 @@ void delay(int number_of_seconds)
 	while (clock() < start_time + milli_seconds);
 }
 
-void push(STACK* s, uint16_t val)
-{
-	if (s->_pos == s->_size - 1) {
-		uint16_t* nStack = (uint16_t*) realloc(s->_stack, s->_size * 2);
-		if (nStack == NULL)
-		{
-			printf("Could not resize stack, current size: %d\nexiting", s->_size);
-			free(s->_stack);
-			exit(1);
-		} 
-		else
-		{
-			s->_stack = nStack;
-		}
-		
-		s->_size *= 2;
-	}
-
-	s->_pos += 1;
-	s->_stack[s->_pos] = val;
-}
-
-uint16_t pop(STACK* stack)
-{
-	if (stack->_pos - 1 >= 0) {
-		stack->_pos -= 1;
-		return stack->_stack[stack->_pos + 1];
-	}
-}
-
 int fetch(CPU* cpu)
 {
 	uint16_t fByte = (uint16_t) cpu->_M->_MEM[cpu->_PC];
 	uint8_t sByte = cpu->_M->_MEM[cpu->_PC + 1];
 
 	uint16_t instruction = (fByte << 8) | sByte;
-
-	cpu->_PC += 2;
 
 	cpu->_CINSTR = instruction;
 
@@ -94,33 +58,41 @@ void decode(CPU* cpu)
 			} break;
 			case 0xEE:
 			{
-				uint16_t addr = pop(cpu->_S);
-				cpu->_PC = addr;
+				cpu->_SP--;
+				if (cpu->_SP < 0) {
+					perror("Stack overflow");
+					exit(1);
+				}
+				cpu->_PC = cpu->_STACK[cpu->_SP];
 
 			} break;
-			default: instr_error(cpu->_CINSTR, det,cpu->_S);  break;
+			default: instr_error(cpu->_CINSTR, det);  break;
 			}
 		} break;
 	case 0x01:
 	{
-		cpu->_PC = (cpu->_CINSTR) & 0x0FFF;
+		cpu->_PC = ((cpu->_CINSTR) & 0x0FFF);
 	} break;
 	case 0x02:
 	{
-		push(cpu->_S, cpu->_PC);
-		cpu->_PC = ((cpu->_CINSTR) & 0x0FFF);
+		cpu->_STACK[cpu->_SP] = cpu->_PC;
+		cpu->_SP++;
+		cpu->_PC = (cpu->_CINSTR & 0x0FFF) + PROGRAM_OFFSET;
+		//cpu->_PC -= 2;
 	} break;
 	case 0x03:
 	{
 		// 3XNN 
 		uint8_t reg = ((cpu->_CINSTR >> 8) & 0x000F);
 		uint8_t val = (cpu->_CINSTR & 0x00FF);
-		if (cpu->_REG[reg] == val) {
+		if (cpu->_REG[reg] == val)
+		{
 			cpu->_PC += 2;
 		}
 	} break;
 	case 0x04:
 	{
+		// 4XNN
 		uint8_t reg = ((cpu->_CINSTR >> 8) & 0x000F);
 		uint8_t val = (cpu->_CINSTR & 0x00FF);
 		if (cpu->_REG[reg] != val) {
@@ -129,10 +101,12 @@ void decode(CPU* cpu)
 	} break;
 	case 0x05:
 	{
-		uint8_t condition = ((cpu->_CINSTR & 0xFFF0));
-		if (condition == 0x0000) {
-			uint8_t xReg = ((cpu->_CINSTR >> 8) & 0x000F);
-			uint8_t yReg = ((cpu->_CINSTR >> 4) & 0x000F);
+		// 5XY0
+		if ((cpu->_CINSTR & 0x000F) == 0)
+		{
+			// 5XY0
+			uint8_t xReg = ((cpu->_CINSTR & 0x0F00) >> 8) & 0x000F;
+			uint8_t yReg = ((cpu->_CINSTR & 0x00F0) >> 4) & 0x000F;
 			if (cpu->_REG[xReg] == cpu->_REG[yReg])
 			{
 				cpu->_PC += 2;
@@ -142,14 +116,14 @@ void decode(CPU* cpu)
 	case 0x06:
 	{
 		// 6XNN
-		uint8_t reg = ((cpu->_CINSTR >> 8) & 0x000F);
 		uint8_t val = (uint8_t)cpu->_CINSTR & 0x00FF;
+		uint8_t reg = ((cpu->_CINSTR >> 8) & 0x000F);
 
 		cpu->_REG[reg] = val;
 	} break;
 	case 0x07:
 	{
-		// ADD 
+		// 7XNN 
 		uint8_t reg = ((cpu->_CINSTR >> 8) & 0x000F);
 		uint8_t val = (uint8_t)cpu->_CINSTR;
 
@@ -202,11 +176,11 @@ void decode(CPU* cpu)
 				cpu->_REG[VF] = 0;
 			}
 
-			cpu->_REG[xReg] += cpu->_REG[yReg];
+			cpu->_REG[xReg] = (cpu->_REG[xReg] + cpu->_REG[yReg]) & 0xFF;
 		} break;
 		case 0x05:
 		{
-			// SUB with VF FLAG
+			// 8XY5
 			uint8_t xReg = (cpu->_CINSTR >> 8) & 0x000F;
 			uint8_t yReg = (cpu->_CINSTR >> 4) & 0x000F;
 			
@@ -219,7 +193,7 @@ void decode(CPU* cpu)
 				cpu->_REG[VF] = 0;
 			}
 
-			cpu->_REG[xReg] -= cpu->_REG[yReg];
+			cpu->_REG[xReg] = cpu->_REG[xReg] - cpu->_REG[yReg];
 		} break;
 		case 0x06:
 		{
@@ -247,7 +221,7 @@ void decode(CPU* cpu)
 		} break;
 		case 0x07:
 		{
-			// SUB with VF FLAG
+			// 8XY7
 			uint8_t xReg = (cpu->_CINSTR >> 8) & 0x000F;
 			uint8_t yReg = (cpu->_CINSTR >> 4) & 0x000F;
 
@@ -285,7 +259,7 @@ void decode(CPU* cpu)
 
 			cpu->_REG[xReg] = cpu->_REG[xReg] << 1;
 		} break;
-		default: instr_error(cpu->_CINSTR, sub_op,cpu->_S); break;
+		default: instr_error(cpu->_CINSTR, sub_op); break;
 		}
 	} break;
 	case 0x09:
@@ -311,11 +285,11 @@ void decode(CPU* cpu)
 	
 		if (COSMAC_TARGET)
 		{
-			cpu->_PC = NNN + (uint16_t)(cpu->_REG[0x0]);
+			cpu->_PC = NNN + (uint16_t)(cpu->_REG[0]);
 		} 
 		else
 		{
-			cpu->_PC = NNN + (cpu->_CINSTR & 0x0F00);
+			cpu->_PC = NNN + cpu->_REG[((cpu->_CINSTR >> 8) & 0x000F)];
 		}
 	} break;
 	case 0x0C:
@@ -356,8 +330,8 @@ void decode(CPU* cpu)
 				uint8_t val = (sData >> (7 - bit)) & 0x0001;
 				if ((val > 0) && (cpu->_D->_DSP[yCord][xCord] == 1))
 				{
-					uint8_t nData = (sData & (~((0x1 << (7 - bit)))));
-					cpu->_M->_MEM[cpu->_I + i] = nData;
+					uint8_t nData = sData ^ (0x0001 << (7 - bit));
+
 					cpu->_D->_DSP[yCord][xCord] = 0;
 					cpu->_REG[VF] = 1;
 				}
@@ -371,12 +345,42 @@ void decode(CPU* cpu)
 			yCord += 1;
 		}	
 	} break;
+	case 0x0E:
+	{
+		uint16_t cond = (cpu->_CINSTR & 0xF0FF);
+		switch (cond)
+		{
+		case 0xE09E:
+		{
+			if (cpu->_K._KEYBOARD[(cpu->_CINSTR >> 8) & 0x000F] == 1)
+			{
+				cpu->_PC += 2;
+			}
+		} break;
 
+		case 0xE0A1:
+		{
+			if (cpu->_K._KEYBOARD[(cpu->_CINSTR >> 8) & 0x000F] != 1)
+			{
+				cpu->_PC += 2;
+			}
+		} break;
+
+		default:
+			instr_error(cpu->_CINSTR, 0x0E);
+			break;
+		}
+	} break;
 	case 0x0F:
 	{
 		uint8_t sub_op = (uint8_t)((cpu->_CINSTR) & 0x00FF);
 		switch (sub_op)
 		{
+		case 0x29:
+		{
+			uint8_t reg = (cpu->_CINSTR >> 8) & 0x000F;
+			cpu->_I = FONT_OFFSET + cpu->_REG[reg];
+		} break;
 		case 0x55:
 		{
 			uint8_t reg = 0;
@@ -428,11 +432,16 @@ void decode(CPU* cpu)
 			cpu->_M->_MEM[cpu->_I + 1] = mid_digit;
 			cpu->_M->_MEM[cpu->_I + 2] = last_digit;
 		} break;
-		default: instr_error(cpu->_CINSTR, sub_op,cpu->_S); break;
+		case 0x1E:
+		{
+			uint8_t reg = (cpu->_CINSTR >> 8) & 0x000F;
+			cpu->_I += cpu->_REG[reg];
+		} break;
+		default: instr_error(cpu->_CINSTR, sub_op); break;
 		}
 	} break;
 
-	default: instr_error(cpu->_CINSTR, op,cpu->_S); break;
+	default: instr_error(cpu->_CINSTR, op); break;
 	}
 }
 
@@ -450,18 +459,28 @@ CPU* create_cpu()
 	cpu->_M = malloc(sizeof(MEMORY));
 	if (!cpu->_M) { perror("malloc of memory\n"); exit(1); }
 
-	// create stack
-	cpu->_S = malloc(sizeof(STACK));
-	if (!cpu->_S) { perror("malloc of stack\n"); exit(1); }
+	memset(cpu->_K._KEYBOARD, 0, 16);
+
+	// initialize font
+	int i;
+	for (i = 0; i < FONTSET_SIZE; i++) {
+		cpu->_M->_MEM[FONT_OFFSET + i] = fontset[i];
+	}
+
+	memset(cpu->_STACK, 0, 12);
+	cpu->_SP = 0;
 
 	clear_display(cpu->_D);
 
 	erase_memory(cpu->_M);
 
-	init_stack(cpu->_S);
+	memset(cpu->_REG, 0, 16);
+
+	memset(cpu->_CALLS, 0, 100);
+	cpu->_CALLSI = 0;
 
 	// set program counter to byte 512
-	cpu->_PC = 0x0200;
+	cpu->_PC = PROGRAM_OFFSET;
 	
 	// set index register to 0
 	cpu->_I = 0x0000;
@@ -495,13 +514,6 @@ void erase_memory(MEMORY* memory)
 	memset(memory->_MEM, 0, MEM_SIZE);
 }
 
-void init_stack(STACK* stack)
-{
-	stack->_stack = malloc(sizeof(START_STACK));
-	stack->_size = START_STACK;
-	stack->_pos = 0;
-}
-
 void draw_display(DISPLAY* disp)
 {
 	int i, j;
@@ -522,14 +534,140 @@ void draw_display(DISPLAY* disp)
 	}
 }
 
+void display_stack(CPU* cpu)
+{
+	int i;
+	printf("STACK: ");
+	for (i = 0; i < cpu->_SP; i++) {
+		printf("%.4x ", cpu->_STACK[i]);
+	}
+	printf("\n");
+}	
+
+
+void display_registers(CPU* cpu)
+{
+	printf("------REGISTERS------\n");
+	int i;
+	for (i = 0; i < 16; i++)
+	{
+		printf("V%.1X: %.2X ", i, cpu->_REG[i]);
+		if (((i+1) % 2) == 0) 
+		{
+			printf("\n");
+		}
+	}
+	printf("\nINDEX: %.4X\n", cpu->_I);
+	printf("---------------------\n");
+}
+
+void load_program(CPU* cpu, const char* program)
+{
+	uint8_t programFile[PROGRAM_SIZE];
+
+	memset(programFile, 0, PROGRAM_SIZE);
+
+	FILE* fp;
+	fp = fopen(program, "r");
+	if (!fp)
+	{
+		perror("Error opening program file %s\n", program);
+		exit(1);
+	}
+
+	while (fgets(programFile, PROGRAM_SIZE, fp) != NULL) {}
+
+	fclose(fp);
+
+	int i;
+	for (i = 0; i < PROGRAM_SIZE; i++)
+	{
+		cpu->_M->_MEM[PROGRAM_OFFSET + i] = programFile[i];
+	}
+}
+
+void run(CPU* cpu)
+{
+	for (;;)
+	{
+		fetch(cpu);
+
+		if (DEBUG)
+		{
+			display_registers(cpu);
+			display_stack(cpu);
+			printf("PC: %.4X\n", cpu->_PC);
+			printf("CINSTR: %.4X\n", cpu->_CINSTR);
+		}
+
+		cpu->_PC += 2;
+
+		decode(cpu);
+		draw_display(cpu->_D);
+		//delay_cpu(0.75);
+		//_getch();
+	}
+}
+
 int main(int argc, char** argv)
 {
 	CPU* cpu = create_cpu();
+	load_program(cpu, PROGRAM);
 
-	free(cpu->_S->_stack);
-	free(cpu->_S);
+	//run(cpu);
+
+	sfRenderWindow* window;
+	sfVideoMode vmode;
+	vmode.height = 720;
+	vmode.width = 1280;
+	vmode.bitsPerPixel = 32;
+
+	sfFont* font;
+	font = sfFont_createFromFile("arial.ttf");
+	sfText *text;
+	text = sfText_create();
+	sfText_setFont(text, font);
+	sfText_setCharacterSize(text, 30);
+	sfText_setFillColor(text, sfColor_fromRGB(255, 255, 255));
+
+	window = sfRenderWindow_create(vmode, "Window", sfDefaultStyle, sfContextDefault);
+	if (window == NULL) {
+		perror("Error Creating window");
+		exit(1);
+	}
+
+	while (sfRenderWindow_isOpen(window)) {
+		sfEvent e;
+		sfEventType type;
+		while (sfRenderWindow_pollEvent(window, &e)) {
+			if (e.type == sfEvtClosed) {
+				sfRenderWindow_close(window);
+			}
+			if (e.type == sfEvtKeyPressed) {
+				switch (e.key.code) {
+				case sfKeyF:
+				{
+					fetch(cpu);					
+				} break;
+				case sfKeyE:
+				{
+					decode(cpu);
+				} break;
+				default: break;
+				}
+			}
+		}
+
+		sfRenderWindow_clear(window, sfColor_fromRGB(0, 0, 0));
+		
+		sfRenderWindow_drawText(window, text, NULL);
+
+		sfRenderWindow_display(window);
+	}
+	
 	free(cpu->_D);
 	free(cpu->_M);
+	
 	free(cpu);
 	return 0;
 }

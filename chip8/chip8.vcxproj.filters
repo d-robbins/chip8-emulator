@@ -17,6 +17,11 @@
   <ItemGroup>
     <None Include="tests\IBM Logo.ch8" />
     <None Include="tests\test_opcode.ch8" />
+    <None Include="tests\opcode_test_2.ch8" />
+    <None Include="tests\bc_test.ch8" />
+    <None Include="tests\Cave.ch8" />
+    <None Include="tests\Chip8 Picture.ch8" />
+    <None Include="tests\sirpinski.ch8" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.c">
